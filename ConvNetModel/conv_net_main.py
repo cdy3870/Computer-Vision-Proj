@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 from torchvision.datasets import CocoDetection
 from tqdm import tqdm
+from glove_setup import glove
 
 def main():
 	parser = argparse.ArgumentParser(description="")
@@ -32,7 +33,8 @@ def main():
 
 	device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 	model = models.mobilenet_v2(pretrained=True)
-	model.fc = nn.Linear(model.classifier[1].in_features, num_classes)
+	embedding_dim = glove['the'].shape[1]
+	model.fc = nn.Embedding(model.classifier[1].in_features, embedding_dim)
 	hyperparameters = {'learning_rate': args.lr, 'optimizer': optimizer, 'n_epochs': args.epochs}
 
 
