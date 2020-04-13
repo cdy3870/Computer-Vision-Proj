@@ -35,6 +35,7 @@ def main():
 	model = models.mobilenet_v2(pretrained=True)
 	embedding_dim = glove['the'].shape[1]
 	model.fc = nn.Embedding(model.classifier[1].in_features, embedding_dim)
+	model = nn.Sequential(model, nn.Linear(embedding_dim, num_classes))
 	hyperparameters = {'learning_rate': args.lr, 'optimizer': optimizer, 'n_epochs': args.epochs}
 
 
