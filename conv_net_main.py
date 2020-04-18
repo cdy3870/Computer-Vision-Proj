@@ -13,31 +13,30 @@ from torchvision.datasets import CocoDetection
 from tqdm import tqdm
 from glove_setup import glove
 
-def main():
-	parser = argparse.ArgumentParser(description="")
-	parser.add_argument('--lr', type=float)
-	parser.add_argument('--epochs', type=int)
-	args = parser.parse_args()
+class CifarDataset(torch.utils.data.Dataset):
+	
+	def __init__(self, root_dir, transform):
+		"""Initializes a dataset containing images and labels."""
+		super().__init__()
+		self.transform = transform
+		self.root_dir = root_dir
+		classes = os.listdir(root_dir)
+		self.img_names = [os.path.join(os.path.join(root_dir, classes[i]), img_name) for i in range(len(classes)) for img_name in os.listdir(os.path.join(root_dir, classes[i]))]
+		self.label_names = [i for i in range(len(classes)) for image in os.listdir(os.path.join(root_dir, classes[i]))]
+		print(self.label_names)
+		#print(self.img_names)
+		#raise NotImplementedError
 
-	coco_train_path = "data/train2017"
-	coco_train_labels = "data/annotations/instances_train2017.json"
-	coco_val_path = "data/val2017"
-	coco_val_labels = "data/annotations/instances_val2017.json"
+	def __len__(self):
+		"""Returns the size of the dataset."""
+		return len(self.img_names) 
 
-	#num_classes = 
-	coco_train_dataset = datasets.CocoDetection(root=coco_train_path, annFile=coco_train_labels)
-	coco_val_dataset = datasets.CocoDetection(root=coco_val_path, annFile=coco_val_labels)
+	def __getitem__(self, index):
+		img = (Image.open(self.img_names[index]))
+		img = self.transform(Image.open(self.img_names[index]))
+		label = self.label_names[index]
 
-	dataloader_coco['train'] =  torch.utils.data.DataLoader(coco_train_dataset, batch_size=4, shuffle=True, num_workers=4, collate_fn=utils.collate_fn)
-	dataloader_coco['val'] =  torch.utils.data.DataLoader(coco_val_dataset, batch_size=4, shuffle=True, num_workers=4, collate_fn=utils.collate_fn)
-
-	device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-	model = models.mobilenet_v2(pretrained=True)
-	embedding_dim = glove['the'].shape[1]
-	model.fc = nn.Embedding(model.classifier[1].in_features, embedding_dim)
-	model = nn.Sequential(model, nn.Linear(embedding_dim, num_classes))
-	hyperparameters = {'learning_rate': args.lr, 'optimizer': optimizer, 'n_epochs': args.epochs}
-
+		return img, label
 
 def train(model, device, dataloader, hyperparameters, name):
 	model = model.to(device)
@@ -118,6 +117,46 @@ def test(dataloader, dataset_sizes, num_classes, device):
 	epoch_acc = all_batchs_corrects.double() / dataset_sizes[phase]
 
 	return epoch_acc
+
+def main():
+	parser = argparse.ArgumentParser(description="")
+	parser.add_argument('--lr', type=float)
+	parser.add_argument('--epochs', type=int)
+	args = parser.parse_args()
+
+	#transform for normal training
+	transform = transforms.Compose([
+		transforms.Grayscale(num_output_channels=1),
+		transforms.ToTensor()
+	])
+
+	#transform for transfer learning
+	"""transform = transforms.Compose([
+		transforms.Resize((224, 224)),
+		transforms.ToTensor()
+	])"""
+
+	#create train and test dataloaders
+	TRAIN_DIRECTORY_PATH = "cifar10_train"
+	train_dataset = CifarDataset(TRAIN_DIRECTORY_PATH, transform)
+
+	#use a split of 80 20 for train and test data
+	train_size = int(0.8*len(train_dataset))
+	test_size = len(train_dataset) - train_size
+	train_dataset, test_dataset = torch.utils.data.random_split(train_dataset, (train_size, test_size)) 
+	train_dataloader = torch.utils.data.DataLoader(train_dataset,
+											batch_size=batch_size,
+											shuffle=True)
+	test_dataloader = torch.utils.data.DataLoader(test_dataset,
+										batch_size=batch_size,
+										shuffle=True) 
+
+	device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+	model = models.mobilenet_v2(pretrained=True)
+	embedding_dim = glove['the'].shape[1]
+	model.fc = nn.Embedding(model.classifier[1].in_features, embedding_dim)
+	model = nn.Sequential(model, nn.Linear(embedding_dim, num_classes))
+	hyperparameters = {'learning_rate': args.lr, 'optimizer': optimizer, 'n_epochs': args.epochs}
 
 
 
