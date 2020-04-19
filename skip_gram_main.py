@@ -3,9 +3,10 @@ import torch
 #import torch.autograd as autograd
 import torch.nn as nn
 import torch.nn.functional as F
+from gensim.models import Word2Vec, KeyedVectors
 #import torch.optim as optim
 
-class word2vec(nn.Module):
+"""class word2vec(nn.Module):
     def __init__(self, vocabulary_size, embedding_dims):
         super(word2vec, self).__init__()
         
@@ -40,15 +41,23 @@ class word2vec(nn.Module):
     
     def predict(self, test_input):
         word_embedding = self.i2h(test_input)
-        return word_embedding
+        return word_embedding"""
+
+class Word2Vec():
+    def __init__(self, model_url):
+        self.model = KeyedVectors.load_word2vec_format(model_url, binary=True, unicode_errors='replace')
+
+    def get_embedding_dims(self):
+        return self.model.vector_size
+
 
 
 def main():
     #vocabulary_size = 
     #embedding_dims = 50
-
-    model = word2vec(vocabulary_size, embedding_dim)
-    print(model)
+    model = Word2Vec("word2vec_model.txt").get_model()
+    
+    print(model['bird'])
 
 
 if __name__ == "__main__":

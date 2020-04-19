@@ -9,9 +9,42 @@ import copy
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
-from torchvision.datasets import CocoDetection
 from tqdm import tqdm
-from glove_setup import glove
+from absl import app, flags
+from skip_gram_main import Word2Vec
+from mobilenet_v2 import mobilenet_v2
+
+FLAGS = flags.FLAGS
+flags.DEFINE_float('learning_rate', 1e-3, 'Learning rate.')
+flags.DEFINE_float('weight_decay', 0, 'Weight decay (L2 regularization).')
+flags.DEFINE_integer('batch_size', 100, 'Number of examples per batch.')
+flags.DEFINE_integer('epochs', 20, 'Number of epochs for training.')
+flags.DEFINE_string('experiment_name', 'exp', 'Defines experiment name.')
+
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+        
+    def forward(self, x):
+        return x
+
+class Embedding(nn.Module):
+    def __init__(self, embedding_dim):
+        super(Embedding, self).__init__()
+        self.embedding = nn.Embedding(1280, embedding_dim)
+        
+    def forward(self, x):
+    	x = self.embedding(x)
+        return x
+
+class Classify(nn.Module):
+    def __init__(self, num_classes):
+        super(Classify, self).__init__()
+        self.classifier= nn.Linear(1280, num_classes)
+        
+    def forward(self, x):
+    	x = self.classifier(x)
+        return x
 
 class CifarDataset(torch.utils.data.Dataset):
 	
@@ -23,7 +56,6 @@ class CifarDataset(torch.utils.data.Dataset):
 		classes = os.listdir(root_dir)
 		self.img_names = [os.path.join(os.path.join(root_dir, classes[i]), img_name) for i in range(len(classes)) for img_name in os.listdir(os.path.join(root_dir, classes[i]))]
 		self.label_names = [i for i in range(len(classes)) for image in os.listdir(os.path.join(root_dir, classes[i]))]
-		print(self.label_names)
 		#print(self.img_names)
 		#raise NotImplementedError
 
@@ -38,11 +70,13 @@ class CifarDataset(torch.utils.data.Dataset):
 
 		return img, label
 
-def train(model, device, dataloader, hyperparameters, name):
+def train(model, layer1, layer2, device, dataloader):
 	model = model.to(device)
-	optimizer = hyperparameters['optimizer']
+	optimizer = torch.optim.Adam(model.parameters(), 
+								lr=FLAGS.learning_rate, 
+								weight_decay=FLAGS.weight_decay)
 	scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
-	total_epochs = tqdm(range(hyperparameters['n_epochs']))
+	total_epochs = tqdm(range(FLAGS.epochs))
 	best_acc = 0.0
 	all_batchs_loss = 0
 	all_batchs_corrects = 0
@@ -60,9 +94,14 @@ def train(model, device, dataloader, hyperparameters, name):
 				optimizer.zero_grad()
 
 				with torch.set_grad_enabled(phase == 'train'):
-					outputs = model(images)
+					output = model(images) 
+					embedding_output = layer1(output)
+					class_output = layer2(output)
+	
+					#loss = 
+
 					if phase == 'train':					
-						losses.backward()
+						loss.backward()
 						optimizer.step()
 
 				all_batchs_loss += loss.item() * inputs.size(0)
@@ -80,9 +119,9 @@ def train(model, device, dataloader, hyperparameters, name):
 					best_acc = epoch_acc
 					best_model_wts = copy.deepcopy(model.state_dict())
 					#permission issue fix when trying to write to an existing file
-					if os.path.exists("model_weight_" + str(hyperparameters['lr']) + "_" + str(hyperparameters['n_epochs']) + ".pth"):
-						os.remove("model_weight_" + str(hyperparameters['lr']) + "_" + str(hyperparameters['n_epochs']) + ".pth")
-					torch.save(best_model_wts , "model_weight_" + str(hyperparameters['lr']) + "_" + str(hyperparameters['n_epochs']) + ".pth")
+					if os.path.exists("model_weight_" + str(FLAGS.learning_rate) + "_" + str(FLAGS.epochs) + ".pth"):
+						os.remove("model_weight_" + str(FLAGS.learning_rate) + "_" + str(FLAGS.epochs) + ".pth")
+					torch.save(best_model_wts , "model_weight_" + str(FLAGS.learning_rate) + "_" + str(FLAGS.epochs) + ".pth")
 
 	print(best_acc)
 
@@ -119,11 +158,6 @@ def test(dataloader, dataset_sizes, num_classes, device):
 	return epoch_acc
 
 def main():
-	parser = argparse.ArgumentParser(description="")
-	parser.add_argument('--lr', type=float)
-	parser.add_argument('--epochs', type=int)
-	args = parser.parse_args()
-
 	#transform for normal training
 	transform = transforms.Compose([
 		transforms.Grayscale(num_output_channels=1),
@@ -136,28 +170,47 @@ def main():
 		transforms.ToTensor()
 	])"""
 
-	#create train and test dataloaders
+#create train and test dataloaders
 	TRAIN_DIRECTORY_PATH = "cifar10_train"
-	train_dataset = CifarDataset(TRAIN_DIRECTORY_PATH, transform)
+	dataset = CifarDataset(TRAIN_DIRECTORY_PATH, transform)
 
-	#use a split of 80 20 for train and test data
-	train_size = int(0.8*len(train_dataset))
-	test_size = len(train_dataset) - train_size
-	train_dataset, test_dataset = torch.utils.data.random_split(train_dataset, (train_size, test_size)) 
-	train_dataloader = torch.utils.data.DataLoader(train_dataset,
-											batch_size=batch_size,
+	#use a split of 60 20 20 for train val and test splits 
+	train_size = int(0.6*len(dataset))
+	test_size = int((len(dataset) - train_size)/2)
+	val_size = test_size
+
+	train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(dataset, (train_size, val_size, test_size)) 
+	dataloader = {}
+	dataloader['train'] = torch.utils.data.DataLoader(train_dataset,
+											batch_size=100,
 											shuffle=True)
-	test_dataloader = torch.utils.data.DataLoader(test_dataset,
-										batch_size=batch_size,
+	dataloader['val'] = torch.utils.data.DataLoader(val_dataset,
+										batch_size=100,
 										shuffle=True) 
+	dataloader['test'] = torch.utils.data.DataLoader(test_dataset,
+										batch_size=100,
+										shuffle=True) 
+
+	num_classes = 10
 
 	device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 	model = models.mobilenet_v2(pretrained=True)
-	embedding_dim = glove['the'].shape[1]
-	model.fc = nn.Embedding(model.classifier[1].in_features, embedding_dim)
-	model = nn.Sequential(model, nn.Linear(embedding_dim, num_classes))
-	hyperparameters = {'learning_rate': args.lr, 'optimizer': optimizer, 'n_epochs': args.epochs}
+	model.classifier = Identity()
+
+	embedding_dim = Word2Vec("word2vec_model.txt").get_embedding_dims()
+	layer1 = Embedding(embedding_dim)
+	layer2 = Classify(num_classes)
 
 
+	
+	#model = mobilenet_v2(embedding_dim=embedding_dim, pretrained=True, progress=True)	 
+	#model = nn.Sequential(model, nn.Linear(embedding_dim, num_classes))
+	#print(model)
 
+	if FLAGS.task_type == 'training':
+		train(model, layer1, layer2, device, dataloader)
+	elif FLAGS.task_type == 'testing':
+		test(model, layer1, layer2, device, dataloader)
 
+if __name__ == "__main__":
+	main()
