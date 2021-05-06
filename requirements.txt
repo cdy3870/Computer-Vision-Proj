@@ -49,7 +49,7 @@ et-xmlfile==1.0.1
 fastcache==1.0.2
 Flask==1.0.2
 Flask-Bootstrap==3.3.7.1
-Flask-Cors==3.0.2
+Flask-Cors==3.0.9
 Flask-Migrate==1.8.0
 Flask-Script==2.0.6
 Flask-SQLAlchemy==2.1
